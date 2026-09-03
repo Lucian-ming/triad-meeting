@@ -1,0 +1,48 @@
+{
+  "name": "triad-meeting",
+  "version": "0.2.0",
+  "description": "Multi-Agent Consensus & Adversarial Peer Review Orchestrator for Claude Code, Codex, OpenCode, Aider & Gemini",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "triad-meeting": "./bin/triad-meeting.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "doctor": "node bin/triad-meeting.mjs doctor"
+  },
+  "keywords": [
+    "multi-agent",
+    "ai-agent",
+    "code-review",
+    "consensus",
+    "claude-code",
+    "openai-codex",
+    "opencode",
+    "aider",
+    "gemini",
+    "developer-tools",
+    "orchestrator",
+    "cli"
+  ],
+  "author": "Lucian-ming <fyt0091@tju.edu.cn>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lucian-ming/triad-meeting.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Lucian-ming/triad-meeting/issues"
+  },
+  "homepage": "https://github.com/Lucian-ming/triad-meeting#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE",
+    "triad-meeting.mjs"
+  ]
+}

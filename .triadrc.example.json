@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/partial-tsconfig.json",
+  "rounds": 2,
+  "mode": "adversarial",
+  "flow": "sequential",
+  "agents": ["claude", "codex", "opencode"],
+  "synthesizer": "codex",
+  "executor": "codex",
+  "timeoutMs": 600000,
+  "models": {
+    "claude": "claude-3-7-sonnet",
+    "codex": "o3-mini",
+    "aider": "deepseek-coder"
+  },
+  "customAgents": {
+    "my-local-llm": {
+      "name": "Local DeepSeek R1",
+      "command": "ollama",
+      "discussArgs": ["run", "deepseek-r1"],
+      "executeArgs": ["run", "deepseek-r1"],
+      "stdin": true
+    }
+  }
+}
