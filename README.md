@@ -167,12 +167,16 @@ USAGE:
   triad-meeting run [options] --file task.md
   triad-meeting doctor
   triad-meeting modes
+  triad-meeting presets
+
+PRESETS & TEMPLATES:
+  -p, --preset <name>     Apply workflow shortcut: pr-review, architecture, security, quick-fix, brainstorm
 
 CORE OPTIONS:
   -r, --rounds <N>        Discussion rounds before synthesis (default: 2)
   -m, --mode <mode>       Meeting archetype: adversarial, consensus, audit, refactor, brainstorm (default: adversarial)
   --flow <flow>           Deliberation flow: sequential (default, turn-based debate) or parallel
-  --agents, --only <list> Comma-separated agents: claude, codex, opencode, aider, gemini (default: claude,codex,opencode)
+  --agents, --only <list> Comma-separated agents: claude, codex, opencode, aider, gemini (auto-detects if omitted)
   --without <list>        Exclude specific agents from the meeting
   --cwd <dir>             Shared workspace root (default: current directory)
   -e, --execute           Let the selected executor implement changes following consensus
@@ -294,13 +298,14 @@ Create a `.triadrc.json` file in your repository root or `~/.config/triad/config
 ### 快速上手
 
 ```bash
-# 1. 检查各 Agent CLI 可用状态
+# 1. 检查各 Agent CLI 可用状态与预设
 triad-meeting doctor
+triad-meeting presets
 
-# 2. 查看所有预设会议模式
-triad-meeting modes
+# 2. 一键使用快捷工作流预设（如 PR 审查）
+triad-meeting run --preset pr-review "审查 PR #42 变更，排查潜在死锁与测试覆盖遗漏"
 
-# 3. 2 轮严苛技术评审
+# 3. 2 轮严苛技术评审（自动选择当前已安装的 Agent）
 triad-meeting run --rounds 2 "评审当前项目数据库连接池架构，找出高并发瓶颈"
 
 # 4. 仅限 Claude 和 Aider 进行代码重构评审

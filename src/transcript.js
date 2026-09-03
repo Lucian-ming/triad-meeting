@@ -11,13 +11,54 @@ export function defaultTranscriptPath(date) {
 
 export function writeTranscript(path, data) {
   mkdirSync(dirname(path), { recursive: true });
-  const mdContent = renderMarkdownTranscript(data);
+  const metrics = calculateMetrics(data.transcript, data.synthesis, data.execution, data.options);
+  const mdContent = renderMarkdownTranscript({ ...data, metrics });
   writeFileSync(path, mdContent, "utf8");
 
   if (data.options?.json) {
     const jsonPath = path.endsWith(".md") ? path.replace(/\.md$/, ".json") : `${path}.json`;
-    writeFileSync(jsonPath, JSON.stringify(data, null, 2), "utf8");
+    writeFileSync(jsonPath, JSON.stringify({ ...data, metrics }, null, 2), "utf8");
   }
+}
+
+export function calculateMetrics(transcript = [], synthesis = null, execution = null, options = {}) {
+  const agentStats = {};
+
+  const recordEntry = (agent, durationMs, stdout = "", exitCode = 0) => {
+    if (!agent) return;
+    if (!agentStats[agent]) {
+      agentStats[agent] = {
+        displayName: getDisplayName(agent, options),
+        turns: 0,
+        durationMs: 0,
+        chars: 0,
+        estTokens: 0,
+        errors: 0,
+      };
+    }
+    agentStats[agent].turns += 1;
+    agentStats[agent].durationMs += durationMs || 0;
+    const cleanChars = (stdout || "").length;
+    agentStats[agent].chars += cleanChars;
+    agentStats[agent].estTokens += Math.round(cleanChars / 4);
+    if (exitCode !== 0) {
+      agentStats[agent].errors += 1;
+    }
+  };
+
+  for (const entry of transcript) {
+    recordEntry(entry.agent, entry.durationMs, entry.stdout, entry.exitCode);
+  }
+
+  if (synthesis && options.synthesizer) {
+    recordEntry(options.synthesizer, synthesis.durationMs, synthesis.stdout, synthesis.exitCode);
+  }
+
+  if (execution && options.executor) {
+    recordEntry(options.executor, execution.durationMs, execution.stdout, execution.exitCode);
+  }
+
+  return agentStats;
 }
 
 export function renderMarkdownTranscript({
@@ -30,6 +71,7 @@ export function renderMarkdownTranscript({
   execution,
   verification,
   diff,
+  metrics,
 }) {
   const durationTotalMs = endedAt ? endedAt.getTime() - startedAt.getTime() : 0;
   const agentNames = options.agents.map((a) => getDisplayName(a, options)).join(", ");
@@ -152,6 +194,22 @@ export function renderMarkdownTranscript({
     }
   }
 
+  if (metrics && Object.keys(metrics).length > 0) {
+    lines.push(
+      "## 📊 Agent Performance & Metrics",
+      "",
+      "| Agent | Turns | Duration | Output Chars | Est. Tokens | Status |",
+      "| --- | --- | --- | --- | --- | --- |",
+    );
+    for (const [key, stat] of Object.entries(metrics)) {
+      const statusStr = stat.errors === 0 ? "✅ Healthy" : `⚠ ${stat.errors} errors`;
+      lines.push(
+        `| **${stat.displayName || key}** | ${stat.turns} | ${(stat.durationMs / 1000).toFixed(1)}s | ${stat.chars.toLocaleString()} | ~${stat.estTokens.toLocaleString()} | ${statusStr} |`
+      );
+    }
+    lines.push("");
+  }
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -159,13 +217,19 @@ export function formatTranscriptForPrompt(transcript, maxChars, options = {}) {
   const text = transcript
     .map((entry) => {
       const name = getDisplayName(entry.agent, options);
-      const stdout = entry.stdout.trim() || "(no stdout)";
-      const stderr = entry.stderr && entry.stderr.trim() ? `\nStderr:\n${entry.stderr.trim()}` : "";
+      let stdout = entry.stdout.trim();
+      if (entry.exitCode !== 0 && entry.exitCode !== null) {
+        stdout = `[NOTICE: Agent invocation encountered an issue (exit ${entry.exitCode})]\n${stdout || entry.stderr?.trim() || "(no stdout)"}`;
+      } else if (!stdout) {
+        stdout = "(no stdout)";
+      }
+
+      const stderr = entry.stderr && entry.stderr.trim() && entry.exitCode !== 0 ? `\nStderr:\n${entry.stderr.trim()}` : "";
       return [
         `Round ${entry.round} - ${name} (${entry.phase}, exit ${entry.exitCode ?? "error"}):`,
         stdout,
         stderr,
-      ].join("\n");
+      ].filter(Boolean).join("\n");
     })
     .join("\n\n---\n\n");
 

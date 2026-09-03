@@ -54,3 +54,20 @@ export function getDisplayName(key, config = {}) {
     return key;
   }
 }
+
+export function detectAvailableAgents(config = {}, options = {}) {
+  const adapters = getAllAdapters(config);
+  const available = [];
+  const missing = [];
+
+  for (const [key, adapter] of Object.entries(adapters)) {
+    const check = adapter.checkAvailable(options);
+    if (check.ok) {
+      available.push({ key, displayName: adapter.displayName, version: check.version });
+    } else {
+      missing.push({ key, displayName: adapter.displayName, error: check.error });
+    }
+  }
+
+  return { available, missing };
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import process from "node:process";
-import { parseArgs, printHelp, readTask, runDoctor, runModesList } from "../src/cli.js";
+import { parseArgs, printHelp, readTask, runDoctor, runModesList, runPresetsList } from "../src/cli.js";
 import { runMeeting } from "../src/engine.js";
 import { VERSION } from "../src/config.js";
 import { colors, printError } from "../src/ui.js";
@@ -31,6 +31,11 @@ async function main() {
 
   if (parsed.command === "modes") {
     runModesList();
+    return;
+  }
+
+  if (parsed.command === "presets" || parsed.command === "templates") {
+    runPresetsList();
     return;
   }
 

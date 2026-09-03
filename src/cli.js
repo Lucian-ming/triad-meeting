@@ -4,8 +4,9 @@ import { resolve } from "node:path";
 import process from "node:process";
 import os from "node:os";
 import { DEFAULT_CONFIG, loadConfigFile, mergeConfig, VERSION } from "./config.js";
-import { getAllAdapters, getDisplayName, listAvailableAgentKeys } from "./adapters/index.js";
+import { detectAvailableAgents, getAllAdapters, getDisplayName, listAvailableAgentKeys } from "./adapters/index.js";
 import { listModes, getMode } from "./modes.js";
+import { getPreset, listPresets } from "./presets.js";
 import { colors, printBanner, printError, printSection, printSuccess, printWarning, renderTable } from "./ui.js";
 
 export function parseArgs(argv) {
@@ -14,7 +15,7 @@ export function parseArgs(argv) {
 
   if (args[0] && !args[0].startsWith("-")) {
     const first = args.shift();
-    if (["run", "doctor", "status", "modes", "version", "help"].includes(first)) {
+    if (["run", "doctor", "status", "modes", "presets", "templates", "version", "help"].includes(first)) {
       command = first;
     } else {
       args.unshift(first);
@@ -26,8 +27,10 @@ export function parseArgs(argv) {
   const excludedAgents = [];
   let file = null;
   let customConfigPath = null;
+  let presetName = null;
   let help = false;
   let version = false;
+  let agentsExplicit = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -40,6 +43,10 @@ export function parseArgs(argv) {
       customConfigPath = resolve(requiredValue(args[++i], "--config"));
     } else if (arg.startsWith("--config=")) {
       customConfigPath = resolve(arg.slice("--config=".length));
+    } else if (arg === "--preset" || arg === "-p") {
+      presetName = requiredValue(args[++i], "--preset");
+    } else if (arg.startsWith("--preset=")) {
+      presetName = arg.slice("--preset=".length);
     } else if (arg === "--rounds" || arg === "-r") {
       cliOptions.rounds = parsePositiveInt(args[++i], "--rounds");
     } else if (arg.startsWith("--rounds=")) {
@@ -98,8 +105,10 @@ export function parseArgs(argv) {
       cliOptions.synthesizer = arg.slice("--synthesizer=".length).toLowerCase();
     } else if (arg === "--agents" || arg === "--only") {
       cliOptions.agents = parseList(requiredValue(args[++i], arg));
+      agentsExplicit = true;
     } else if (arg.startsWith("--agents=") || arg.startsWith("--only=")) {
       cliOptions.agents = parseList(arg.split("=")[1]);
+      agentsExplicit = true;
     } else if (arg === "--without") {
       excludedAgents.push(...parseList(requiredValue(args[++i], "--without")));
     } else if (arg.startsWith("--without=")) {
@@ -124,8 +133,27 @@ export function parseArgs(argv) {
 
   // Load config file
   const { config: fileConfig, path: configPath } = loadConfigFile(customConfigPath, cliOptions.cwd || process.cwd());
-  const options = mergeConfig(DEFAULT_CONFIG, fileConfig, cliOptions);
+
+  // Apply preset if selected
+  let presetOptions = {};
+  if (presetName) {
+    const preset = getPreset(presetName);
+    presetOptions = preset.options;
+  }
+
+  const baseConfig = { ...DEFAULT_CONFIG, ...presetOptions };
+  const options = mergeConfig(baseConfig, fileConfig, cliOptions);
   options.configPath = configPath;
+
+  // Auto-detect installed agents if not explicitly specified
+  if (!agentsExplicit && (!fileConfig.agents || fileConfig.agents.length === 0)) {
+    const { available } = detectAvailableAgents(fileConfig, { cwd: options.cwd });
+    if (available.length >= 2) {
+      options.agents = available.map((a) => a.key);
+    } else if (available.length === 1) {
+      options.agents = [available[0].key];
+    }
+  }
 
   // Handle excluded agents
   if (excludedAgents.length > 0) {
@@ -134,7 +162,15 @@ export function parseArgs(argv) {
   }
 
   if (options.agents.length === 0) {
-    throw new Error("No agents selected. Please specify at least one agent with --agents or --only.");
+    throw new Error("No agents available or selected. Run `triad-meeting doctor` to check installed tools, or specify --agents.");
+  }
+
+  // Ensure synthesizer and executor point to a valid agent in options.agents if not explicitly set
+  if (!cliOptions.synthesizer && options.synthesizer !== "none" && !options.agents.includes(options.synthesizer)) {
+    options.synthesizer = options.agents[0];
+  }
+  if (!cliOptions.executor && options.execute && !options.agents.includes(options.executor)) {
+    options.executor = options.agents[0];
   }
 
   // Validate mode
@@ -213,6 +249,16 @@ export function runModesList() {
   }
 }
 
+export function runPresetsList() {
+  printBanner("Triad Meeting Presets", "Ready-to-use Workflow Shortcuts");
+  const presets = listPresets();
+  for (const p of presets) {
+    console.log(colors.bold(colors.cyan(`▶ ${p.key}`)) + colors.white(` - ${p.name}`));
+    console.log(`  ${colors.dim(p.description)}`);
+    console.log(`  ${colors.gray(`Options: mode=${p.options.mode}, rounds=${p.options.rounds}, flow=${p.options.flow}${p.options.execute ? ", execute=true" : ""}`)}\n`);
+  }
+}
+
 export function printHelp() {
   console.log(`
 ${colors.bold(colors.cyan("triad-meeting"))} ${colors.gray(`v${VERSION}`)}
@@ -223,12 +269,16 @@ ${colors.bold("USAGE:")}
   ${colors.green("triad-meeting run")} [options] --file task.md
   ${colors.green("triad-meeting doctor")}
   ${colors.green("triad-meeting modes")}
+  ${colors.green("triad-meeting presets")}
+
+${colors.bold("PRESETS & TEMPLATES:")}
+  -p, --preset <name>     Apply workflow preset: pr-review, architecture, security, quick-fix, brainstorm
 
 ${colors.bold("CORE OPTIONS:")}
   -r, --rounds <N>        Discussion rounds before synthesis (default: 2)
   -m, --mode <mode>       Meeting archetype: adversarial, consensus, audit, refactor, brainstorm (default: adversarial)
   --flow <flow>           Deliberation flow: sequential (default, turn-based debate) or parallel
-  --agents, --only <list> Comma-separated agents: claude, codex, opencode, aider, gemini (default: claude,codex,opencode)
+  --agents, --only <list> Comma-separated agents: claude, codex, opencode, aider, gemini (auto-detects if omitted)
   --without <list>        Exclude specific agents from the meeting
   --cwd <dir>             Shared workspace root (default: current directory)
   -e, --execute           Let the selected executor implement changes following consensus
@@ -243,22 +293,15 @@ ${colors.bold("CORE OPTIONS:")}
   --show-logs             Stream agent stderr logs live to terminal
   --no-stream             Disable live output streaming
 
-${colors.bold("MODEL SELECTION:")}
-  --model <name>          Default model for agents that accept it
-  --claude-model <name>   Specific model for Claude Code
-  --codex-model <name>    Specific model for Codex
-  --opencode-model <name> Specific model for OpenCode
-  --aider-model <name>    Specific model for Aider
-
 ${colors.bold("EXAMPLES:")}
-  ${colors.dim("# 1. Adversarial RFC architecture review with Claude, Codex & Aider")}
-  triad-meeting run --agents claude,codex,aider --mode adversarial --rounds 2 "Review auth RFC and find race conditions"
+  ${colors.dim("# 1. Run PR Review preset")}
+  triad-meeting run --preset pr-review "Review pull request #42 changes"
 
-  ${colors.dim("# 2. Security audit on repository")}
-  triad-meeting run --mode audit "Audit SQL queries and API route authorization"
+  ${colors.dim("# 2. Security audit with Claude and Aider")}
+  triad-meeting run --agents claude,aider --mode audit "Audit API endpoints"
 
-  ${colors.dim("# 3. Debate, synthesize, execute, and verify with tests")}
-  triad-meeting run --execute --executor codex --verify "npm test" --diff "Fix failing tests in user-auth.test.ts"
+  ${colors.dim("# 3. Quick bug fix with automated verification")}
+  triad-meeting run --preset quick-fix --verify "npm test" "Fix race condition in session.js"
 `);
 }
 

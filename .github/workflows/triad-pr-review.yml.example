@@ -1,0 +1,68 @@
+# Example GitHub Actions Workflow for automated PR review with triad-meeting
+# Copy this file to .github/workflows/triad-pr-review.yml in your repo
+
+name: Triad Multi-Agent PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    name: Multi-Agent Adversarial Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install triad-meeting
+        run: npm install -g triad-meeting
+
+      # Setup your agent CLIs (e.g. Aider, Claude Code, etc.) and API keys
+      # - name: Setup Aider
+      #   run: pip install aider-chat
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Generate PR Diff Context
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          echo "PR diff size: $(wc -l < pr_diff.txt) lines"
+
+      - name: Run Triad Deliberation
+        run: |
+          triad-meeting run \
+            --preset pr-review \
+            --file pr_diff.txt \
+            --out pr_review_report.md \
+            "Review this PR diff for race conditions, security vulnerabilities, edge cases, and missing tests."
+
+      - name: Post PR Review Comment
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('pr_review_report.md')) {
+              const report = fs.readFileSync('pr_review_report.md', 'utf8');
+              const body = `## 🤝 Triad Multi-Agent Deliberation Report\n\n${report}`;
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }

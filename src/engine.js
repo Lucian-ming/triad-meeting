@@ -16,9 +16,11 @@ import {
   printSuccess,
   printWarning,
   printError,
+  renderTable,
 } from "./ui.js";
 import {
   appendLimited,
+  calculateMetrics,
   defaultTranscriptPath,
   formatTranscriptForPrompt,
   tail,
@@ -109,6 +111,7 @@ export async function runMeeting(task, options) {
 
   const endedAt = new Date();
   const transcriptPath = options.out || defaultTranscriptPath(startedAt);
+  const metrics = calculateMetrics(transcript, synthesis, execution, options);
 
   writeTranscript(transcriptPath, {
     task,
@@ -120,7 +123,20 @@ export async function runMeeting(task, options) {
     execution,
     verification,
     diff,
+    metrics,
   });
+
+  // Display metrics summary
+  printSection("Deliberation Metrics & Performance");
+  const metricRows = Object.entries(metrics).map(([key, stat]) => [
+    stat.displayName || key,
+    String(stat.turns),
+    formatDuration(stat.durationMs),
+    stat.chars.toLocaleString(),
+    `~${stat.estTokens.toLocaleString()}`,
+    stat.errors === 0 ? colors.green("✔ OK") : colors.yellow(`⚠ ${stat.errors} err`),
+  ]);
+  renderTable(["Agent", "Turns", "Duration", "Output (chars)", "Est. Tokens", "Status"], metricRows);
 
   printSection("Meeting Concluded");
   printSuccess(`Report saved: ${colors.bold(transcriptPath)}`);
@@ -142,6 +158,7 @@ export async function runMeeting(task, options) {
     execution,
     verification,
     diff,
+    metrics,
   };
 }
 
@@ -234,7 +251,7 @@ export async function invokeAgent(agentKey, prompt, phase, options, executionOpt
       signal: null,
       stdout: "(dry run)",
       stderr: "",
-      durationMs: 0,
+      durationMs: 10,
       timedOut: false,
     };
   }
@@ -255,10 +272,19 @@ function runProcess(adapter, phase, invocation, options, { bufferOutput = false 
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let hasReceivedFirstChunk = false;
 
     const badge = getAgentBadge(adapter.key, adapter.displayName);
     const outWriter = makePrefixWriter(`${badge} `, process.stdout);
     const errWriter = makePrefixWriter(`${badge}${colors.red("[log]")} `, process.stderr);
+
+    // Subtle thinking heartbeat for terminal users
+    const heartbeatInterval = setInterval(() => {
+      if (!hasReceivedFirstChunk && options.stream && !bufferOutput && process.stdout.isTTY) {
+        const elapsedSec = Math.round((Date.now() - started) / 1000);
+        process.stdout.write(`\r${badge} ${colors.dim(`⠋ Thinking... (${elapsedSec}s)`)}`);
+      }
+    }, 4000);
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -267,6 +293,10 @@ function runProcess(adapter, phase, invocation, options, { bufferOutput = false 
     }, options.timeoutMs);
 
     child.stdout.on("data", (chunk) => {
+      if (!hasReceivedFirstChunk && process.stdout.isTTY && options.stream && !bufferOutput) {
+        process.stdout.write("\r\x1b[K"); // Clear thinking line
+      }
+      hasReceivedFirstChunk = true;
       const text = chunk.toString("utf8");
       stdout = appendLimited(stdout, text, options.maxOutputChars);
       if (options.stream && !bufferOutput) {
@@ -283,7 +313,11 @@ function runProcess(adapter, phase, invocation, options, { bufferOutput = false 
     });
 
     child.on("error", (error) => {
+      clearInterval(heartbeatInterval);
       clearTimeout(timer);
+      if (!hasReceivedFirstChunk && process.stdout.isTTY) {
+        process.stdout.write("\r\x1b[K");
+      }
       outWriter.flush();
       errWriter.flush();
       resolveProcess({
@@ -300,7 +334,12 @@ function runProcess(adapter, phase, invocation, options, { bufferOutput = false 
     });
 
     child.on("close", (exitCode, signal) => {
+      clearInterval(heartbeatInterval);
       clearTimeout(timer);
+      if (!hasReceivedFirstChunk && process.stdout.isTTY) {
+        process.stdout.write("\r\x1b[K");
+      }
+
       const fileOutput = readAndRemoveOutputFile(invocation.outputFile);
       if (fileOutput.trim()) {
         stdout = appendLimited(stdout, fileOutput, options.maxOutputChars);
@@ -310,7 +349,6 @@ function runProcess(adapter, phase, invocation, options, { bufferOutput = false 
       }
 
       if (bufferOutput && options.stream) {
-        // Output clean block when buffered
         process.stdout.write(`\n--- ${adapter.displayName} (${formatDuration(Date.now() - started)}) ---\n`);
         outWriter.write(stdout.trim() + "\n");
       }
