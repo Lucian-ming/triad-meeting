@@ -26,5 +26,8 @@ jobs:
       - name: Run Doctor
         run: node bin/triad-meeting.mjs doctor
 
+      - name: Run Dry-Run Meeting
+        run: node bin/triad-meeting.mjs run --dry-run "Test CI task"
+
       - name: Run Tests
         run: npm test
